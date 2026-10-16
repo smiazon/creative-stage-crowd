@@ -173,7 +173,7 @@ const ARENA = {
   bird: { hw: 85, hh: 68, y: 120, far: 200 },
   fly: { x: 88, z: 74, yMax: 44.0 },   // high enough to see the raised roof
   jumbo: { x: 0, hang: 18.4, up: 32.5 },
-  audio: { mainX: -19.5, mainY: 9, mainZ: 13.5, subX: -20.5, rearX: 25, rearY: 8, rearZ: 12 },
+  audio: { mainX: -19.5, mainY: 9, mainZ: 13.5, subX: -20.5, rearX: 25, rearY: 21, rearZ: 13.5 },   // the delays fly at 21 m, clear of every view of the stage (delaypa.js)
   soundPreset: null,
   followSpot: { x: 34, y: 27.5, hoist: 11.95 },
   sphere: null,                      // the giant video sphere is a stadium stage

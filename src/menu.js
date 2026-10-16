@@ -285,6 +285,7 @@ export function initMenu({ controls, builder, spawn }) {
   // initMenu runs while main.js is still evaluating, and entering the sim
   // touches module constants declared further down, so let the module finish
   const intent = builder.takeBootIntent();
+  api.fromReload = !!intent;   // back from a venue switch: straight in, the show as it was
   if (intent) {
     document.body.classList.add('menu');
     queueMicrotask(() => enterSim({ open: !!intent.open }));

@@ -8,16 +8,29 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="mobile-web-app-capable" content="yes" />
-<title>Creative Stage</title>
+<title>Creative Stage Crowd</title>
 <!-- installed to a phone's home screen: its own icon, full screen, no address bar -->
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-title" content="Creative Stage">
+<meta name="apple-mobile-web-app-title" content="Stage Crowd">
 <meta name="theme-color" content="#050506">
 <script>
   // the phone and tablet showcase (a separate site, built by tools/build-mobile-web.sh): ?mobile here
   window.PIXMOB_MOBILE = true;
   if (window.PIXMOB_MOBILE) { document.documentElement.classList.add('mobile'); document.write('<link rel="stylesheet" href="./src/mobile.css?v=1">'); }
+  // which of the phone apps this is: one engine, four apps (tools/build-mobile-web.sh bakes it in; ?app= here)
+  //   crowd    the wristbands' shows (and Auto show), the lights and screens following them
+  //   light    your song as a production show: Auto show moves the stage lights; the crowd joins in
+  //   moments  one-tap moments for games, shows and celebrations: lights, screens, effects, wristbands
+  //   build    set the room up: venue, stage, runway, screens, truss, crowd, the view from any seat
+  window.PIXMOB_APP = 'crowd';
+  window.PIXMOB_APPS = {
+    crowd: { name: 'Creative Stage Crowd', word: 'CROWD', short: 'Stage Crowd' },
+    light: { name: 'Creative Stage Light', word: 'LIGHT', short: 'Stage Light' },
+    moments: { name: 'Creative Stage Moments', word: 'MOMENTS', short: 'Stage Moments' },
+    build: { name: 'Creative Stage Build', word: 'BUILD', short: 'Stage Build' },
+  };
+  document.documentElement.dataset.app = window.PIXMOB_APP;
 </script>
 <script>
   // the desktop app's hidden video maker (?render): it reads your settings but never writes them
@@ -2886,7 +2899,7 @@
 </style>
 </head>
 <body>
-<div id="bootLoader" role="progressbar" aria-label="Loading Creative Stage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+<div id="bootLoader" role="progressbar" aria-label="Loading Creative Stage Crowd" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
   <div class="bl"><h1><span class="csName">CREATIVE</span><b>STAGE</b></h1><div class="bar"><i></i></div><div class="st"><span>Loading…</span><em>0%</em></div></div>
 </div>
 <script>
@@ -2927,6 +2940,7 @@
   setTimeout(function () { window.__boot.done(); }, 60000);
 })();
 </script>
+<script src="./src/gate.js?v=1"></script>   <!-- the phone: the code, first thing (over the loading screen) -->
 <div id="overlay">
   <div class="mScreen active" data-ms="landing">
     <video id="mBgVideo" data-src="./assets/menu-bg.mp4?v=2" data-src-mobile="./assets/menu-bg-mobile.mp4" autoplay muted loop playsinline></video>

@@ -125,11 +125,16 @@ export function initBuilder(api) {
   // --- reloads: the other building, or the sphere's own rig -------------------
   // the rig a building needs for the current stage: the sphere brings its ring
   // rig, everything else flies the house rig (no plan)
-  function wantRig(venue) {
-    if (venue !== 'stadium' || !SPEC.sphere || !isSphere(st.cfg)) return null;
-    return makeRingRigPlan(SPEC.sphere, CAT_H);
-  }
   const sameRig = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  // a designed rig (the Build app's concepts, a saved plan) stays up through stage changes in its
+  // own building; only another building, or the sphere, takes it down
+  function wantRig(venue) {
+    const sphere = venue === 'stadium' && SPEC.sphere ? makeRingRigPlan(SPEC.sphere, CAT_H) : null;
+    if (sphere && isSphere(st.cfg)) return sphere;
+    const cur = api.currentRig?.();
+    if (cur && venue === VENUE && !sameRig(cur, sphere)) return cur;
+    return null;
+  }
   function needsReboot(venue = VENUE) {
     gate();
     return venue !== VENUE || !sameRig(api.currentRig?.(), wantRig(venue));
@@ -143,7 +148,7 @@ export function initBuilder(api) {
     const plan = wantRig(venue);
     try {
       if (plan) localStorage.setItem(RIG_KEY, JSON.stringify(plan));
-      else localStorage.removeItem(RIG_KEY);
+      else if (api.currentRig?.()) localStorage.removeItem(RIG_KEY);   // only the rig this page hangs (another phone app's design stays)
       localStorage.setItem(BOOT_KEY, JSON.stringify({ creative: snapshot(), open: !!keepOpen }));
     } catch (_) { /* storage blocked: the reload lands on the menu instead */ }
     const where = venue !== VENUE ? `Opening the ${venue}` : 'Hanging the rig';

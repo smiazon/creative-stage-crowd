@@ -11,7 +11,6 @@
 import * as THREE from 'three';
 import { FONTS } from './showlooks.js';
 
-const CODE = '0000';
 const OK_KEY = 'pm-mobile-ok';
 const DEV_CODE = '1234', DEV_KEY = 'pm-dev';   // dev mode: the same app, with the features being built
 const IDLE_MS = 5000;   // a showcase on the spot: long enough not to flicker, short enough to feel clean
@@ -28,7 +27,7 @@ const svg = (body, { fill = false, w = 1.9 } = {}) => `<svg viewBox="0 0 24 24" 
 
 export function initMobile({
   camera, view, controls, nextAngle, touchMove, menuUI, overlay, closeAll = () => {},
-  toggleFly, isFlying = () => false, keys = {}, focus, bird, fx = {}, designer, setScreens, pa = null,
+  toggleFly, isFlying = () => false, keys = {}, focus, bird, fx = {}, designer, setScreens, pa = null, renderer = null, eng = {},
 }) {
   const root = document.documentElement;
   // cards added later (dev mode's Auto show) join the one-thing-open rule
@@ -58,13 +57,15 @@ export function initMobile({
     mainMenu();
   };
   if (unlocked) { setTimeout(() => { goIn(); entered = true; }, 200); if (dev) setTimeout(() => setDev(true), 0); }   // a venue switch reloads the page: straight back in
-  else gate(unlock);
+  else (window.pmGateFirst || new Promise((res) => window.pmGate(res))).then(unlock);   // the code came first (gate.js); maybe typed already
 
   // the main menu: the desktop app's own landing (the film, STAGE through the texture clip,
   // the ENTER ring), named Creative Stage, plus Back to the code. ENTER walks in.
   const land = overlay.querySelector('.mScreen[data-ms=landing]');
   const logo = land?.querySelector('.mTitle .pmLogo');
   if (logo) logo.outerHTML = '<b class="csWord">CREATIVE</b>';
+  const APP = window.PIXMOB_APP || 'crowd', APPS = window.PIXMOB_APPS || {};
+  land?.querySelector('.mTitle')?.insertAdjacentHTML('afterend', `<p class="mLandApp">${APPS[APP]?.word || ''}</p>`);   // which of the three apps
   land?.insertAdjacentHTML('beforeend', '<button class="mLandBack" aria-label="Back to the code">‹ Back</button><p class="mLandDev">Dev mode</p>');
   // the phone's own light cut of the two films, loaded the first time the menu shows
   const films = () => {
@@ -89,7 +90,7 @@ export function initMobile({
     if (e.target.closest('.mLandBack')) {   // back to the code: 0000 or 1234
       e.stopPropagation();
       try { sessionStorage.removeItem(OK_KEY); sessionStorage.removeItem(DEV_KEY); } catch (_) { /* private mode */ }
-      gate(unlock);
+      window.pmGate(unlock);
       return;
     }
     if (!e.target.closest('#mEnter')) return;
@@ -367,7 +368,7 @@ export function initMobile({
   // --- AUTO SHOW: a song runs the room (autoshow.js). One button under Focus opens its card:
   // the song (Restart, Play, Pause under its name), Stop show, the PA, the colours, the energy,
   // the style. The button shows bars moving while the song plays.
-  function autoShowUI() {
+  function autoShowUI(driverP = null) {
     const btn = document.createElement('button');
     btn.id = 'mAuto';
     btn.className = 'mIcon';
@@ -389,9 +390,9 @@ export function initMobile({
     card.id = 'mAutoCard';
     document.body.appendChild(card);
     let auto = null, M = null;
-    const ready = import('./autoshow.js').then((m) => {
+    const ready = Promise.all([import('./autoshow.js'), driverP]).then(([m, driver]) => {
       M = m;
-      auto = m.initAutoShow({ designer, setScreens, pa });
+      auto = m.initAutoShow({ designer, setScreens, pa, renderer, driver });
       autoApi = auto;
       auto.onChange = paint;
       build();
@@ -408,7 +409,7 @@ export function initMobile({
               <button data-tr="play" aria-label="Play">${PLAY}<span>Play</span></button>
               <button data-tr="pause" aria-label="Pause">${PAUSE}<span>Pause</span></button>
             </div>
-            <i class="maBar"><i></i></i>
+            <div class="maSeek" aria-label="Playhead"><div class="maTrack"><i class="maFill"></i><b class="maHead"></b></div></div>
             <div class="maTime"><span class="maCount"></span><span class="maClock"></span></div>
           </div>
           <button class="maStop"><span class="maIco"></span>Stop show</button>
@@ -419,10 +420,27 @@ export function initMobile({
           <h4>Energy</h4>
           <div class="maEnergy">${M.AUTO_ENERGY.map(([id, n]) => `<button data-energy="${id}">${n}</button>`).join('')}</div>
           <h4>Style</h4>
-          <div class="maStyle">${M.AUTO_STYLES.map(([id, n]) => `<button data-style="${id}">${n}</button>`).join('')}</div>
+          <div class="maStyle">${auto.styles.map(([id, n]) => `<button data-style="${id}">${n}</button>`).join('')}</div>
         </div>`;
       card.querySelector('.mCardClose').addEventListener('click', (e) => { e.stopPropagation(); openCard(false); });
       card.addEventListener('click', onCard);
+      // the playhead: hold it and slide anywhere in the song; the song follows as it moves
+      const seekEl = card.querySelector('.maSeek');
+      let seekAt = 0;
+      const at = (e) => { const r = seekEl.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); };
+      const go = (force) => { if (performance.now() - seekAt > 120 || force) { seekAt = performance.now(); auto.seek(scrub * auto.duration); } };
+      seekEl.addEventListener('pointerdown', (e) => {
+        if (!auto.hasSong || !auto.duration) return;
+        e.preventDefault(); e.stopPropagation();
+        try { seekEl.setPointerCapture(e.pointerId); } catch (_) { /* keeps working without it */ }
+        seekEl.classList.add('held');
+        scrub = at(e); tick(); go(true);
+      });
+      seekEl.addEventListener('pointermove', (e) => { if (scrub < 0) return; scrub = at(e); tick(); go(false); });
+      const release = (e) => { if (scrub < 0) return; scrub = at(e); go(true); scrub = -1; seekEl.classList.remove('held'); tick(); };
+      seekEl.addEventListener('pointerup', release);
+      seekEl.addEventListener('pointercancel', release);
+      seekEl.addEventListener('click', (e) => e.stopPropagation());
       paint();
     }
     function paint() {
@@ -452,11 +470,14 @@ export function initMobile({
       tick();
     }
     // the song's progress, its time, and the guess at the music, while the card is up
+    let scrub = -1;   // while the playhead is held: where it is (0..1)
     function tick() {
       if (!M) return;
       const d = auto.duration, c = auto.count;
-      card.querySelector('.maBar > i').style.width = `${d ? (auto.time / d) * 100 : 0}%`;
-      card.querySelector('.maClock').textContent = auto.hasSong && d ? `${clock(auto.time)} / ${clock(d)}` : '';
+      const k = scrub >= 0 ? scrub : d ? auto.time / d : 0;
+      card.querySelector('.maFill').style.width = `${k * 100}%`;
+      card.querySelector('.maHead').style.left = `${k * 100}%`;
+      card.querySelector('.maClock').textContent = auto.hasSong && d ? `${clock(k * d)} / ${clock(d)}` : '';
       card.querySelector('.maCount').textContent = auto.paused ? 'Paused' : c ? `${c.bpm} BPM · bar ${Math.min(c.bar, c.of)}/${c.of}` : auto.playing ? 'Listening for the beat…' : '';
     }
     setInterval(() => { if (card.classList.contains('open')) tick(); }, 250);
@@ -515,6 +536,49 @@ export function initMobile({
       openCard(!card.classList.contains('open'));
     });
     paint();
+  }
+
+  // --- LIGHT and FX: the SHOW card is the app's preset deck (presetdeck.js, apps/<app>.js) ------
+  // Their presets drive the stage (Light) or the spectacle (FX); Settings gets a Crowd sync
+  // switch: on, the wristbands follow what the stage does (the Crowd app, switched around).
+  function appDeck() {
+    const showBtn = document.getElementById('showFab');
+    let defOut;
+    const defP = new Promise((res) => { defOut = res; });
+    const ready = Promise.all([import('./presetdeck.js'), import(`./apps/${APP}.js`)]).then(([D, A]) => {
+      const def = A.buildApp(eng);
+      defOut(def);
+      if (def.button) showBtn?.querySelector('.cfLabel')?.replaceChildren(def.button);   // SHOW, MOMENTS, BUILD
+      const deck = D.initDeck(def);
+      def.ready?.(deck);
+      extraCards.push({ isOpen: () => deck.isOpen, close: () => deck.open(false) });
+      // Settings: Crowd sync, first thing
+      if (set && def.crowdSync) {
+        const row = document.createElement('button');
+        row.id = 'mCrowdSync';
+        row.setAttribute('role', 'switch');
+        row.innerHTML = `<span><b>${def.crowdSync.label || 'Crowd sync'}</b><small>${def.crowdSync.sub || 'The wristbands follow the stage'}</small></span><i></i>`;
+        const paintSync = () => { row.classList.toggle('on', def.crowdSync.on); row.setAttribute('aria-checked', String(def.crowdSync.on)); };
+        row.addEventListener('click', (e) => { e.stopPropagation(); def.crowdSync.set(!def.crowdSync.on); paintSync(); });
+        set.querySelector('.mSetHead')?.after(row);
+        paintSync();
+      }
+      return deck;
+    });
+    // SHOW opens the deck (not the Crowd app's show panel)
+    showBtn?.addEventListener('click', async (e) => {
+      e.stopImmediatePropagation(); e.preventDefault();
+      const deck = await ready;
+      const on = !deck.isOpen;
+      if (on) {
+        closeAll();
+        if (root.classList.contains('mTray')) trayOpen(false);
+        if (bird && bird.mode !== 'off') bird.set('off');
+      }
+      deck.open(on);
+      showBtn.classList.toggle('active', on);
+    }, true);
+    return defP;
   }
 
   // --- the corner buttons ---------------------------------------------------------------------
@@ -661,7 +725,13 @@ export function initMobile({
   };
   window.__fitLens = fitLens;
   fitLens();
-  autoShowUI();   // Auto show: in the app for everyone (it began in dev mode)
+  // the Crowd app: its show panel and Auto show. The others: SHOW opens the app's own deck;
+  // Light has Auto show too, the music moving the stage lights (its driver)
+  if (APP === 'crowd') autoShowUI();
+  else {
+    const defP = appDeck();
+    if (APP === 'light') autoShowUI(defP.then((d) => d.autoDriver));
+  }
   fovIn?.addEventListener('input', () => fitLens());   // after the desktop's own handler has set it
 }
 
@@ -787,29 +857,3 @@ function messageEditor(designer) {
 }
 
 // four big number keys and four dots: 0000 lets you in
-function gate(onOk) {
-  const g = document.createElement('div');
-  g.id = 'mGate';
-  g.innerHTML = `<div class="mgBox">
-    <h1 class="mgName">CREATIVE <b>STAGE</b></h1>
-    <p>Enter the code</p>
-    <div class="mgDots"><i></i><i></i><i></i><i></i></div>
-    <div class="mgPad">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, '⌫'].map((k) => (k === '' ? '<span></span>' : `<button data-k="${k}">${k}</button>`)).join('')}</div>
-  </div>`;
-  document.body.appendChild(g);
-  let typed = '';
-  const dots = [...g.querySelectorAll('.mgDots i')];
-  const paint = () => dots.forEach((d, i) => d.classList.toggle('on', i < typed.length));
-  g.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-k]');
-    if (!b) return;
-    const k = b.dataset.k;
-    if (k === '⌫') typed = typed.slice(0, -1);
-    else if (typed.length < 4) typed += k;
-    paint();
-    if (typed.length === 4) {
-      if (typed === CODE || typed === DEV_CODE) { const code = typed; g.classList.add('ok'); setTimeout(() => { g.remove(); onOk(code); }, 250); }
-      else { g.classList.add('no'); setTimeout(() => { g.classList.remove('no'); typed = ''; paint(); }, 450); }
-    }
-  });
-}

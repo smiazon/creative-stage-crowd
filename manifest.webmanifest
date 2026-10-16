@@ -1,6 +1,6 @@
 {
-  "name": "Creative Stage",
-  "short_name": "Creative Stage",
+  "name": "Creative Stage Crowd",
+  "short_name": "Stage Crowd",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

@@ -174,6 +174,49 @@ const DEMOS = [
   { id: 'dotfloor', name: 'Dotted floor', brand: true, make: ({ A, B, bowl, floor }) => [
     Z(bowl, 'sparkle', A, '#000000', { speed: 0.8 }), Z(floor, 'dots', B, '#000000')] },
   { id: 'northern', name: 'Northern lights', brand: true, make: ({ A, B, all }) => [Z(all, 'flow', A, shade(B, 0.25), { speed: 0.5 })] },
+  // more: the bowl split new ways, new pairings of the looks
+  { id: 'spiral', name: 'Spiral', brand: true, make: ({ A, B, ring, floor }) => [
+    ...[0, 1, 2, 3].map((t) => Z(ring(t), 'sweep', t % 2 ? B : A, '#000000', { phase: t * 0.25, speed: 1.3 })), Z(floor, 'ripple', A, '#000000')] },
+  { id: 'cascade', name: 'Waterfall', brand: true, make: ({ A, B, ring, floor }) => [
+    ...[3, 2, 1, 0].map((t, i) => Z(ring(t), 'pulse', i % 2 ? B : A, shade(A, 0.05), { phase: i * 0.22, speed: 1.1 })), Z(floor, 'rain', B, '#000000')] },
+  { id: 'pingpong', name: 'Ping pong', brand: true, make: ({ A, B, where, floor }) => [
+    Z(where((s) => s.cz < 0), 'pulse', A, '#000000', { speed: 1.8 }), Z(where((s) => s.cz >= 0), 'pulse', B, '#000000', { speed: 1.8, phase: 0.5 }), Z(floor, 'scanner', A, '#000000', { speed: 1.8 })] },
+  { id: 'crossfire', name: 'Crossfire', brand: true, make: ({ A, B, ring, floor }) => [
+    ...[0, 1, 2, 3].map((t) => Z(ring(t), 'comets', t % 2 ? B : A, shade(t % 2 ? A : B, 0.08), { dir: t % 2 ? -1 : 1, speed: 2 })), Z(floor, 'checker', A, B, { speed: 2 })] },
+  { id: 'endtoend', name: 'End to end', brand: true, make: ({ A, B, where, isEnd, floor }) => [
+    Z(where(isEnd), 'pulse', A, '#000000', { speed: 1.4 }), Z(where((s) => !isEnd(s)), 'pulse', B, '#000000', { speed: 1.4, phase: 0.5 }), Z(floor, 'flow', A, B)] },
+  { id: 'quads', name: 'Four corners', brand: true, make: ({ A, B, where, floor }) => [
+    Z(where((s) => s.cx < 0 && s.cz < 0), 'pulse', A, '#000000', { phase: 0 }), Z(where((s) => s.cx >= 0 && s.cz < 0), 'pulse', B, '#000000', { phase: 0.25 }),
+    Z(where((s) => s.cx >= 0 && s.cz >= 0), 'pulse', A, '#000000', { phase: 0.5 }), Z(where((s) => s.cx < 0 && s.cz >= 0), 'pulse', B, '#000000', { phase: 0.75 }), Z(floor, 'sparkle', A, '#000000')] },
+  { id: 'bigflash', name: 'Big flash', brand: true, make: ({ A, all }) => [Z(all, 'pulse', A, '#000000', { speed: 0.7 })] },
+  { id: 'twinkle', name: 'Twinkle', brand: true, make: ({ A, bowl, floor }) => [Z(bowl, 'sparkle', A, '#000000', { speed: 0.5 }), Z(floor, 'stars', A, '#000000')] },
+  { id: 'chevronfloor', name: 'Arrows to stage', brand: true, make: ({ A, B, bowl, floor }) => [Z(bowl, 'chevrons', A, shade(A, 0.08), { dir: -1, speed: 1.4 }), Z(floor, 'chevrons', B, '#000000', { dir: -1, speed: 1.4 })] },
+  { id: 'eqtiers', name: 'Bar graph', brand: true, make: ({ A, B, ring, floor }) => [
+    ...[0, 1, 2, 3].map((t) => Z(ring(t), 'equalizer', t < 2 ? A : B, '#000000', { speed: 1.2 + t * 0.2 })), Z(floor, 'equalizer', A, '#000000')] },
+  { id: 'candy', name: 'Candy stripes', make: ({ ring, floor }) => [
+    ...[0, 1, 2, 3].map((t) => Z(ring(t), 'stripes', ['#ff2fb4', '#ffffff', '#2fd6ff', '#ffffff'][t], ['#ffffff', '#ff2fb4', '#ffffff', '#2fd6ff'][t], { dir: t % 2 ? -1 : 1 })), Z(floor, 'checker', '#ff2fb4', '#ffffff')] },
+  { id: 'neon', name: 'Neon city', make: ({ ring, floor }) => [
+    ...[0, 1, 2, 3].map((t) => Z(ring(t), ['scanner', 'comets', 'scanner', 'rain'][t], ['#ff2bd6', '#00e5ff', '#d8ff3a', '#8a2bff'][t], '#000000', { dir: t % 2 ? -1 : 1, speed: 1.4 })), Z(floor, 'sparkle', '#00e5ff', '#000000')] },
+  { id: 'tropical', name: 'Tropical', make: ({ bowl, floor }) => [Z(bowl, 'flow', '#00ffb3', '#ff7a00', { speed: 0.7 }), Z(floor, 'ocean', '#00d4ff', '#002a1c')] },
+  { id: 'deepsea', name: 'Deep sea', make: ({ bowl, floor }) => [Z(bowl, 'ocean', '#0066ff', '#000814', { speed: 0.6 }), Z(floor, 'sparkle', '#7fffd4', '#000814', { speed: 0.4 })] },
+  { id: 'inferno', name: 'Inferno', make: ({ ring, floor }) => [
+    Z([...ring(0), ...ring(1)], 'fire', '#ff3d00', '#120100', { speed: 1.3 }), Z([...ring(2), ...ring(3)], 'fire', '#ffb000', '#1a0600'), Z(floor, 'fire', '#ff1a00', '#0d0000', { speed: 1.6 })] },
+  { id: 'icecave', name: 'Ice cave', make: ({ bowl, floor }) => [Z(bowl, 'aurora', '#9fe8ff', '#00121c', { speed: 0.6 }), Z(floor, 'sparkle', '#ffffff', '#00121c', { speed: 0.5 })] },
+  { id: 'supernova', name: 'Supernova', make: ({ bowl, floor }) => [Z(bowl, 'fireworks', '#ffffff', '#000000', { speed: 1.4 }), Z(floor, 'ripple', '#ffd24a', '#000000', { speed: 1.6 })] },
+  { id: 'synthwave', name: 'Synthwave', make: ({ ring, floor }) => [
+    Z([...ring(0), ...ring(1)], 'flow', '#ff2bd6', '#2a0040'), Z([...ring(2), ...ring(3)], 'scanner', '#00e5ff', '#12001f', { speed: 0.8 }), Z(floor, 'checker', '#ff2bd6', '#00e5ff', { speed: 0.8 })] },
+  { id: 'jungle', name: 'Jungle', make: ({ bowl, floor }) => [Z(bowl, 'rain', '#39ff6a', '#001a06', { speed: 0.8 }), Z(floor, 'ripple', '#d8ff3a', '#001a06')] },
+  { id: 'prism', name: 'Prism', make: ({ ring, floor }) => [
+    ...[0, 1, 2, 3].map((t) => Z(ring(t), 'solid', ['#ff1430', '#ffe600', '#00ff6a', '#1e5aff'][t], ['#ff1430', '#ffe600', '#00ff6a', '#1e5aff'][t])), Z(floor, 'rainbow', '#ffffff', '#000000')] },
+  { id: 'rainbowwave', name: 'Rainbow wave', make: ({ bowl, floor }) => [Z(bowl, 'rainbow', '#ffffff', '#000000', { speed: 1.6 }), Z(floor, 'wave', '#ffffff', '#000000')] },
+  { id: 'goldrush', name: 'Gold rush', make: ({ bowl, floor }) => [Z(bowl, 'sparkle', '#ffd24a', '#140c00', { speed: 1.2 }), Z(floor, 'confetti', '#ffd24a', '#000000')] },
+  { id: 'valentine', name: 'Valentine', make: ({ ring, floor }) => [Z([...ring(0), ...ring(2)], 'hearts', '#ff1430', '#1a0004'), Z([...ring(1), ...ring(3)], 'hearts', '#ff2bd6', '#1a0012', { dir: -1 }), Z(floor, 'pulse', '#ff1430', '#000000')] },
+  { id: 'xmas', name: 'Holiday', make: ({ ring, floor }) => [
+    ...[0, 1, 2, 3].map((t) => Z(ring(t), 'sparkle', t % 2 ? '#00c853' : '#ff1430', t % 2 ? '#001a08' : '#1a0004', { speed: 0.7 })), Z(floor, 'stars', '#ffffff', '#000000')] },
+  { id: 'halloween', name: 'Spooky', make: ({ bowl, floor }) => [Z(bowl, 'lightning', '#ff7a00', '#0a0014'), Z(floor, 'fire', '#8a2bff', '#0a0014')] },
+  { id: 'dotsrings', name: 'Dot rings', brand: true, make: ({ A, B, ring, floor }) => [
+    ...rings(ring, 'dots', A, B, () => '#000000', (t) => ({ speed: 0.8 + t * 0.3 })), Z(floor, 'dots', B, '#000000')] },
+  { id: 'heartbeat2', name: 'Double heartbeat', brand: true, make: ({ A, B, bowl, floor }) => [Z(bowl, 'pulse', A, '#000000', { speed: 2.3 }), Z(floor, 'pulse', B, '#000000', { speed: 2.3, phase: 0.18 })] },
   // WASH: every band the same effect at once, as the PixMob node runs a crowd.
   // Played from the panel's WASH tab, which sets W (effect, colour, speed,
   // probability); not one of the GRID presets.

@@ -294,11 +294,25 @@ export function buildJumbotron(scene, scoreTex) {
   add(band(ba - 0.1, bb - 0.1, br - 0.1, by1 - BH, by1, true), housing);
   add(cap(ba + 0.05, bb + 0.05, br + 0.05, 0, by1 - BH - 0.02, false), housing);
   for (const y of [by1, by1 - BH]) add(band(ba + 0.04, bb + 0.04, br + 0.04, y - 0.06, y + 0.06, false), trim);
-  // what the belly hangs from
+  // what the belly hangs from: two beams across the bottom of the main board's open middle
+  // (their ends tucked into its ring), and four pipes down from them onto the belly's lid
+  add(cap(ba + 0.05, bb + 0.05, br + 0.05, 0, by1 + 0.01, true), housing);   // the belly's lid, for the pipes to stand on
+  const beamY0 = -H / 2 - 0.06, beamY1 = -H / 2 + 0.2, beamX = A - T + 0.15;
+  for (const sz of [-1, 1]) {
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(beamX * 2, beamY1 - beamY0, 0.26), housing);
+    beam.position.set(0, (beamY0 + beamY1) / 2, sz * (bb - 0.8));
+    grp.add(beam);
+  }
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.6, 0.16), trim);
-    post.position.set(sx * (ba - 1.2), -H / 2 - 0.27, sz * (bb - 0.8));
-    grp.add(post);
+    const x = sx * (ba - 1.2), z = sz * (bb - 0.8), len = beamY0 - by1;
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, len, 12), trim);
+    pipe.position.set(x, by1 + len / 2, z);
+    grp.add(pipe);
+    for (const y of [by1 + 0.03, beamY0 - 0.03]) {   // a flange where it meets each
+      const flange = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.06, 16), trim);
+      flange.position.set(x, y, z);
+      grp.add(flange);
+    }
   }
 
   // rigging up into the grid

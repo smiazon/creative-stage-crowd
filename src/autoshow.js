@@ -1,4 +1,5 @@
-// AUTO SHOW (dev mode): pick a song, press play, and the room runs itself.
+// AUTO SHOW: pick a song, press play, and the room runs itself (the Crowd app: the wristbands;
+// the Light app: the stage lights, through its own driver).
 // The song is listened to live (Web Audio) and split three ways:
 //   LOWS   the kick drum: they're counted into beats and bars (a guess at the tempo), and
 //          the effect changes on a downbeat every 8 to 16 bars, at once on a drop
@@ -8,11 +9,13 @@
 // One style at a time (Grid, Unifying, Grouping or MH), in the colours picked (up to four,
 // or the rainbow), at an energy (Low, Medium, High, Extreme). Colours are only ever bright
 // and saturated, one at a time or several together, now and then white.
-// The screens get an abstract visual of their own (blooms, rings, ribbons, rays, colour
-// fields) on the main stage and round on the B-stage. The song can play from the arena's PA
+// The screens get a visual of their own: random, saturated colour noise drawn on the graphics
+// card (marbled ink, glowing cells, flowing bands, a kaleidoscope; a new one with each effect),
+// that the kick punches (it breathes in, warps and blooms) and the treble makes shimmer. The song can play from the arena's PA
 // (its speaker stacks and the room's acoustics, heard from where you stand), or straight.
 import * as THREE from 'three';
 import { MOTIONS } from './irheads.js';
+import { createNoiseScreens } from './noisescreens.js';
 
 // the colours to pick from: bright and saturated only, and white
 export const AUTO_COLOURS = [
@@ -60,32 +63,90 @@ const IRS = [
   ['cross', 'snap', 'search', 'circles', 'figure8'],
   ['snap', 'cross', 'lighthouse'],
 ];
-const SCENES = [
-  ['bloom', 'ribbons', 'field'],
-  ['bloom', 'ribbons', 'rings', 'rays', 'field'],
-  ['rings', 'rays', 'ribbons', 'field', 'bloom'],
-  ['rings', 'rays', 'field'],
-];
+// the screens' pattern families (0 marbled ink, 1 glowing cells, 2 flowing bands, 3 kaleidoscope)
+const PATTERNS = [[0, 3, 2], [0, 1, 2, 3], [1, 2, 3, 0], [1, 2, 3]];
 
-const KEY = 'pm-auto';
-const TAU = Math.PI * 2;
 const pickOf = (a) => a[(Math.random() * a.length) | 0];
 const lerp = (a, b, k) => a + (b - a) * k;
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
-const toRGB = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 const hueHex = (h) => `#${new THREE.Color().setHSL(((h % 1) + 1) % 1, 1, 0.5).getHexString()}`;
-const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
-export function initAutoShow({ designer, setScreens, pa = null }) {
+// THE CROWD DRIVER: what the music moves in the Crowd app, the wristbands' show (showdesigner.js).
+// A driver says which styles there are, picks an effect for an energy, puts it on, answers a
+// crash, sets the pace, and keeps and gives back what was on before. The Light app has its own
+// (apps/light.js: the music moves the stage lights instead).
+export function makeCrowdDriver(designer) {
+  let glintT = 0;
+  return {
+    key: 'pm-auto',
+    styles: AUTO_STYLES,
+    colourFactor: (style) => (style === 'grid' ? 1.6 : 1),   // a grid redraws its zones: not too often
+    pick({ k, style: st, scheme, shimmer, prev }) {
+      if (st === 'grid') {
+        let pool = GRID[k].filter((id) => id !== prev?.id);
+        if (scheme.mode !== 'mono') pool = pool.filter((id) => !BLEND.has(id));
+        if (shimmer > 0.5) { const sp = pool.filter((id) => SPARKLY.has(id)); if (sp.length && Math.random() < 0.6) pool = sp; }
+        return { style: st, id: pickOf(pool) };
+      }
+      if (st === 'wash') { const [fx, speed] = pickOf(WASHES[k]); return { style: st, id: `${fx}${speed}`, fx, speed }; }
+      if (st === 'group') {
+        const G = GROUPS[k];
+        return {
+          style: st, id: `g${Math.random()}`, order: pickOf(G.order), inner: pickOf(G.inner), step: lerp(G.step[0], G.step[1], Math.random()),
+          groups: G.groups[0] + ((Math.random() * (G.groups[1] - G.groups[0] + 1)) | 0), fx: [0, 1, 2, 3].map(() => pickOf(G.fx)),
+        };
+      }
+      return { style: 'ir', id: pickOf(IRS[k].filter((m) => m !== prev?.id)) };
+    },
+    // put the effect on the wristbands, with the colours as they are now
+    apply(effect, { scheme, shimmer }) {
+      const { mode, cols } = scheme, rainbow = mode === 'rainbow';
+      const prob = Math.max(0.5, 1 - shimmer * 0.5);   // the highs turn a share of the bands into glints
+      if (effect.style === 'grid') {
+        designer.setBrand?.(rainbow ? { rainbow: true } : { a: cols[0], b: cols[1] || cols[0], extra: cols.slice(2), rainbow: false });
+        if (designer.demo !== effect.id) designer.playDemo?.(effect.id);
+      } else if (effect.style === 'wash') {
+        designer.setWash?.({ fx: effect.fx, speed: effect.speed, prob, a: cols[0], pal: cols, cmode: rainbow ? pickOf(['rainbow', 'cycle']) : cols.length > 1 ? 'pal' : 'a' });
+      } else if (effect.style === 'group') {
+        designer.setGroup?.({
+          order: effect.order, inner: effect.inner, step: effect.step, groups: effect.groups, gsplit: 'across', speed: 1,
+          cmode: rainbow ? 'rainbow' : 'group', fx: effect.fx.map((fx, k) => ({ fx: shimmer > 0.6 && k === 3 ? 'twinkle' : fx, a: cols[k % cols.length] })),
+          floor: { fx: effect.fx[0], cols: cols.slice(0, 4), mode: 'chase' },
+        });
+      } else {
+        const m = MOTIONS.find((o) => o.id === effect.id) || MOTIONS[0];
+        designer.setIR?.({ motion: m.id, fx: m.fx || 'solid', gobo: m.gobo || 'circle', size: m.size || 1, heads: 0, prob, a: cols[0], pal: cols, cmode: rainbow ? 'rainbow' : cols.length > 1 ? 'pal' : 'a' });
+      }
+    },
+    // a cymbal crash: a white sparkle runs across the crowd for a moment, then the effect comes back
+    glint(restore, { style: st }) {
+      if (st === 'grid') designer.playDemo?.('phones');
+      else if (st === 'wash') designer.setWash?.({ fx: 'solid', speed: 3, prob: 0.22, a: '#ffffff', cmode: 'a' });
+      else if (st === 'group') designer.setGroup?.({ fx: [0, 1, 2, 3].map(() => ({ fx: 'twinkle', a: '#ffffff' })), cmode: 'group' });
+      else designer.setIR?.({ fx: 'strobe', a: '#ffffff', cmode: 'a' });
+      clearTimeout(glintT);
+      glintT = setTimeout(restore, 650);
+    },
+    pace(t) { designer.setTempo?.(t); },   // the mids: how fast the effect runs
+    snapshot: () => ({ show: designer.snapshot?.(), tempo: designer.tempo }),
+    restore(b) { if (b?.show) designer.restore?.(b.show); if (b && Number.isFinite(b.tempo)) designer.setTempo?.(b.tempo); },
+    end(b) { designer.playDemo?.('blackout'); if (b && Number.isFinite(b.tempo)) designer.setTempo?.(b.tempo); },
+    cancel() { clearTimeout(glintT); },
+  };
+}
+
+export function initAutoShow({ designer, setScreens, pa = null, renderer = null, driver = null }) {
+  const D = driver || makeCrowdDriver(designer);
+  const KEY = D.key || 'pm-auto';
   // --- what was picked (kept between visits) ---------------------------------------------------
-  const cfg = { colours: ['#ff2bd6', '#00e5ff'], rainbow: false, energy: 'medium', style: 'grid', pa: true };
+  const cfg = { colours: ['#ff2bd6', '#00e5ff'], rainbow: false, energy: 'medium', style: D.styles[0][0], pa: true };
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (s) {
       if (Array.isArray(s.colours)) cfg.colours = s.colours.filter((c) => AUTO_COLOURS.some(([h]) => h === c)).slice(0, 4);
       cfg.rainbow = !!s.rainbow;
       if (ENERGY[s.energy]) cfg.energy = s.energy;
-      if (AUTO_STYLES.some(([id]) => id === s.style)) cfg.style = s.style;
+      if (D.styles.some(([id]) => id === s.style)) cfg.style = s.style;
       if (typeof s.pa === 'boolean') cfg.pa = s.pa;
     }
   } catch (_) { /* private mode */ }
@@ -118,7 +179,7 @@ export function initAutoShow({ designer, setScreens, pa = null }) {
     if (playing && cfg.pa && !pa.on) { pa.set(true); paOurs = true; }
     else if ((!playing || !cfg.pa) && pa.on && (paOurs || cfg.pa === false)) { pa.set(false); paOurs = false; }
   }
-  audio.addEventListener('ended', () => stop());
+  audio.addEventListener('ended', () => stop({ end: true }));   // the song is over: the room goes to Blackout
 
   // --- listening: lows, mids, highs ----------------------------------------------------------------
   const A = {
@@ -144,8 +205,7 @@ export function initAutoShow({ designer, setScreens, pa = null }) {
   };
 
   // --- the screens' state (the colours live here too) ----------------------------------------------
-  const V = { scene: 'bloom', cols: [[255, 43, 214]], ci: 0, kick: 0, glint: 0, flash: 0, t: 0, rot: 0, rings: [], parts: [], spec: new Float32Array(32) };
-  const colAt = (i) => V.cols[((i % V.cols.length) + V.cols.length) % V.cols.length];
+  const V = { mode: 0, seed: Math.random() * 10, t: 0, tick: 0, kick: 0, low: 0, lowPeak: 0.2, glint: 0, flash: 0 };
 
   // --- the colours ----------------------------------------------------------------------------------
   // a scheme: one colour, a few together, or the whole rainbow; now and then a white accent
@@ -164,52 +224,14 @@ export function initAutoShow({ designer, setScreens, pa = null }) {
     }
     // sometimes white: a single colour gets a white partner
     if (scheme.mode === 'mono' && scheme.cols[0] !== '#ffffff' && Math.random() < 0.16) scheme = { mode: 'multi', cols: [scheme.cols[0], '#ffffff'] };
-    V.cols = scheme.cols.map(toRGB);
-    V.ci = 0;
+    paintScreens();
   }
 
   // --- the effect: one style, chosen by the energy, in the scheme's colours ---------------------------
   let effect = null;
   const shimmer = () => EN().shimmer * A.highN;   // the highs, as a share 0..1
-  function pickEffect() {
-    const k = EN().k, st = cfg.style;
-    if (st === 'grid') {
-      let pool = GRID[k].filter((id) => id !== effect?.id);
-      if (scheme.mode !== 'mono') pool = pool.filter((id) => !BLEND.has(id));
-      if (shimmer() > 0.5) { const sp = pool.filter((id) => SPARKLY.has(id)); if (sp.length && Math.random() < 0.6) pool = sp; }
-      return { style: st, id: pickOf(pool) };
-    }
-    if (st === 'wash') { const [fx, speed] = pickOf(WASHES[k]); return { style: st, id: `${fx}${speed}`, fx, speed }; }
-    if (st === 'group') {
-      const G = GROUPS[k];
-      return {
-        style: st, id: `g${Math.random()}`, order: pickOf(G.order), inner: pickOf(G.inner), step: lerp(G.step[0], G.step[1], Math.random()),
-        groups: G.groups[0] + ((Math.random() * (G.groups[1] - G.groups[0] + 1)) | 0), fx: [0, 1, 2, 3].map(() => pickOf(G.fx)),
-      };
-    }
-    return { style: 'ir', id: pickOf(IRS[k].filter((m) => m !== effect?.id)) };
-  }
-  // put the effect on the wristbands, with the colours as they are now
-  function apply() {
-    if (!effect) return;
-    const { mode, cols } = scheme, rainbow = mode === 'rainbow';
-    const prob = Math.max(0.5, 1 - shimmer() * 0.5);   // the highs turn a share of the bands into glints
-    if (effect.style === 'grid') {
-      designer.setBrand?.(rainbow ? { rainbow: true } : { a: cols[0], b: cols[1] || cols[0], extra: cols.slice(2), rainbow: false });
-      if (designer.demo !== effect.id) designer.playDemo?.(effect.id);
-    } else if (effect.style === 'wash') {
-      designer.setWash?.({ fx: effect.fx, speed: effect.speed, prob, a: cols[0], pal: cols, cmode: rainbow ? pickOf(['rainbow', 'cycle']) : cols.length > 1 ? 'pal' : 'a' });
-    } else if (effect.style === 'group') {
-      designer.setGroup?.({
-        order: effect.order, inner: effect.inner, step: effect.step, groups: effect.groups, gsplit: 'across', speed: 1,
-        cmode: rainbow ? 'rainbow' : 'group', fx: effect.fx.map((fx, k) => ({ fx: shimmer() > 0.6 && k === 3 ? 'twinkle' : fx, a: cols[k % cols.length] })),
-        floor: { fx: effect.fx[0], cols: cols.slice(0, 4), mode: 'chase' },
-      });
-    } else {
-      const m = MOTIONS.find((o) => o.id === effect.id) || MOTIONS[0];
-      designer.setIR?.({ motion: m.id, fx: m.fx || 'solid', gobo: m.gobo || 'circle', size: m.size || 1, heads: 0, prob, a: cols[0], pal: cols, cmode: rainbow ? 'rainbow' : cols.length > 1 ? 'pal' : 'a' });
-    }
-  }
+  const pickEffect = () => D.pick({ k: EN().k, style: cfg.style, scheme, shimmer: shimmer(), prev: effect });
+  function apply() { if (effect) D.apply(effect, { scheme, shimmer: shimmer(), style: cfg.style, energy: EN().k }); }
   function change(now, { colours = true } = {}) {
     if (colours) { nextScheme(); A.colourAt = now; }
     effect = pickEffect();
@@ -219,32 +241,27 @@ export function initAutoShow({ designer, setScreens, pa = null }) {
     A.beats = 0;   // this is bar 1, beat 1
     const [b0, b1] = EN().bars;
     A.bars = b0 + Math.round(Math.random() * ((b1 - b0) / 4)) * 4;   // 8, 12 or 16: phrases come in fours
-    V.scene = pickOf(SCENES[EN().k].filter((s) => s !== V.scene));
+    V.mode = pickOf(PATTERNS[EN().k].filter((m) => m !== V.mode));   // the screens: a new pattern of their own
+    V.seed = Math.random() * 10;
   }
-  // a cymbal crash: a white sparkle runs across the crowd for a moment, then the effect comes back
-  let glintT = 0;
+  // a cymbal crash: the driver answers it (a white sparkle across the crowd; a blinder hit on the rig)
   function glint(now) {
     A.lastGlint = now;
-    const st = cfg.style;
-    if (st === 'grid') designer.playDemo?.('phones');
-    else if (st === 'wash') designer.setWash?.({ fx: 'solid', speed: 3, prob: 0.22, a: '#ffffff', cmode: 'a' });
-    else if (st === 'group') designer.setGroup?.({ fx: [0, 1, 2, 3].map(() => ({ fx: 'twinkle', a: '#ffffff' })), cmode: 'group' });
-    else designer.setIR?.({ fx: 'strobe', a: '#ffffff', cmode: 'a' });
-    clearTimeout(glintT);
-    glintT = setTimeout(() => { if (playing) apply(); }, 650);
+    D.glint(() => { if (playing) apply(); }, { style: cfg.style });
   }
 
   // --- each frame: listen, decide, draw ---------------------------------------------------------------
   let raf = 0, last = 0, drawn = 0, lastAt = 0;
   function frame(now) {
     raf = playing ? requestAnimationFrame(frame) : 0;
-    if (!analyser) return;
+    if (!playing || !analyser) return;   // stopped: a frame already queued does nothing (the room stays as stop left it)
     const dt = Math.min(0.1, (now - (last || now)) / 1000); last = now;
     // the counting runs on the song's own clock, so a slow frame never loses a beat
     const at = audio.currentTime, adt = Math.max(0, Math.min(0.5, at - lastAt)); lastAt = at;
     analyser.getByteFrequencyData(freq);
     if (paused) {   // paused: the show holds as it is, the screens settle; nothing is counted or changed
-      if (now - drawn > 33) { drawn = now; drawWall(0.033); drawRing(); wallTex.needsUpdate = true; ringTex.needsUpdate = true; }
+      V.t += dt * 0.04; V.kick *= Math.exp(-dt * 4); V.glint *= Math.exp(-dt * 4); V.flash *= Math.exp(-dt * 6);
+      if (now - drawn > 33) { drawn = now; drawScreens(); }
       return;
     }
     const E = EN();
@@ -283,177 +300,51 @@ export function initAutoShow({ designer, setScreens, pa = null }) {
       if (A.lastKick && gap < 2.5) { A.gaps.push(gap); if (A.gaps.length > 12) A.gaps.shift(); guessBeat(); }
       A.lastKick = at; A.kicks++;
       if (Math.abs(A.beats - Math.round(A.beats)) < 0.35) A.beats = Math.round(A.beats);   // on the beat: lock to it
-      V.kick = 1; V.ci++; V.rot += 0.18 + 0.1 * E.k; spawnRing();
+      V.kick = 1;
+      D.kick?.(E.k);
     }
-    if (accent) { A.lastAccent = now; V.glint = Math.min(1, V.glint + 0.5); }
+    if (accent) { A.lastAccent = now; V.glint = Math.min(1, V.glint + 0.55); }
 
     // the lows change the effect: on the downbeat after 8 to 16 bars (a bar late if the drums
     // have stopped), and at once on a drop (loud straight after quiet, a kick on it)
     const due = A.bars * 4;
     const drop = warm && kick && A.beats >= 16 && A.eShort > A.eLong * 1.45 && A.eShort > 0.55;
-    if (!effect || drop || (kick && A.beats >= due - 0.5) || A.beats >= due + 4) change(now);
+    if (!effect || drop || (kick && A.beats >= due - 0.5) || A.beats >= due + 4) { change(now); if (drop) D.drop?.(E.k); }
     // the highs change the colour, on a hi-hat, not too often
-    else if (accent && (now - A.colourAt) / 1000 > E.colour * (cfg.style === 'grid' ? 1.6 : 1) * (1.3 - A.highN * 0.5)) { nextScheme(); A.colourAt = now; apply(); }
+    else if (accent && (now - A.colourAt) / 1000 > E.colour * (D.colourFactor?.(cfg.style) ?? 1) * (1.3 - A.highN * 0.5)) {
+      nextScheme(); A.colourAt = now;
+      if (D.colours) D.colours(effect, { scheme, shimmer: shimmer() }); else apply();
+    }
+    if (accent) D.accent?.(A.highN * E.shimmer);
     // a crash: a white sparkle, now and then
-    if (crash && E.glint && (now - A.lastGlint) / 1000 > E.glint) { glint(now); burst(); }
+    if (crash && E.glint && (now - A.lastGlint) / 1000 > E.glint) { glint(now); V.flash = 1; }
     // the mids set the pace
     if (now - A.tempoAt > 180) {
       A.tempoAt = now;
       const t = lerp(E.tempo[0], E.tempo[1], A.midN ** 1.2);
-      if (Math.abs(t - A.tempoSent) > 0.03) { A.tempoSent = t; designer.setTempo?.(t); }
+      if (Math.abs(t - A.tempoSent) > 0.03) { A.tempoSent = t; D.pace(t, E.k); }
     }
-    if (now - drawn > 33) { drawn = now; drawWall(0.033); drawRing(); wallTex.needsUpdate = true; ringTex.needsUpdate = true; }   // 30 a second is plenty for a screen
+    // the screens: the pattern moves at the mids' pace; the bass and the kick drive it, the treble glints
+    V.t += dt * (0.22 + A.midN * 1.1) * E.vis;
+    V.low += (A.low - V.low) * Math.min(1, dt * 8);
+    V.lowPeak = Math.max(V.low, V.lowPeak * (1 - dt * 0.05));
+    V.kick *= Math.exp(-dt * (4.5 + E.k * 1.5)); V.glint *= Math.exp(-dt * 5); V.flash *= Math.exp(-dt * 6);
+    if (now - drawn > 33) { drawn = now; drawScreens(); }   // 30 a second is plenty for a screen
   }
 
-  // --- the screens: abstract, in the scheme's colours -----------------------------------------------
-  const wallC = document.createElement('canvas'); wallC.width = 1024; wallC.height = 576;
-  const wg = wallC.getContext('2d');
-  const ringC = document.createElement('canvas'); ringC.width = 512; ringC.height = 512;
-  const rg = ringC.getContext('2d');
-  const wallTex = new THREE.CanvasTexture(wallC); wallTex.colorSpace = THREE.SRGBColorSpace;
-  const ringTex = new THREE.CanvasTexture(ringC); ringTex.colorSpace = THREE.SRGBColorSpace;
-  function spawnRing() { V.rings.push({ r: 0, c: colAt(V.ci), w: 0.4 + A.low }); if (V.rings.length > 14) V.rings.shift(); }
-  function burst() {
-    V.flash = 1;
-    const x = 0.2 + Math.random() * 0.6, y = 0.25 + Math.random() * 0.5;
-    for (let i = 0; i < 46; i++) {
-      const a = Math.random() * TAU, s = 0.15 + Math.random() * 0.5;
-      V.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.7 + Math.random() * 0.5, age: 0, c: Math.random() < 0.5 ? [255, 255, 255] : colAt(i), s: 2 + Math.random() * 3 });
-    }
+  // --- the screens: random saturated colour noise, drawn on the graphics card (noisescreens.js) ---
+  const NS = renderer ? createNoiseScreens(renderer) : null;
+  // the colours: every colour picked (the wristbands take them one or a few at a time; the
+  // screens show them all), the rainbow's whole wheel, or one colour with white
+  function paintScreens() {
+    const cols = cfg.rainbow ? scheme.cols : cfg.colours.length > 1 ? cfg.colours : [cfg.colours[0], '#ffffff'];
+    NS?.setPalette(cols, cfg.rainbow);
   }
-  function sparkles(dt) {
-    // the highs: glints, white and in colour, as many as the treble asks for
-    const want = Math.min(10, A.highN ** 1.6 * EN().shimmer * 7 + V.glint * 6);
-    const n = Math.floor(want) + (Math.random() < want % 1 ? 1 : 0);
-    for (let i = 0; i < n; i++) {
-      V.parts.push({ x: Math.random(), y: Math.random(), vx: 0, vy: 0, life: 0.25 + Math.random() * 0.5, age: 0, c: Math.random() < 0.45 ? [255, 255, 255] : colAt(i + V.ci), s: 1.2 + Math.random() * 2.6 });
-    }
-    if (V.parts.length > 420) V.parts.splice(0, V.parts.length - 420);
-    for (const p of V.parts) { p.age += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; }
-    V.parts = V.parts.filter((p) => p.age < p.life);
-  }
-  function drawParts(g, W, H) {
-    for (const p of V.parts) {
-      const k = 1 - p.age / p.life, s = p.s * (W / 1024) * (0.6 + k);
-      g.fillStyle = rgba(p.c, k);
-      g.beginPath(); g.arc(p.x * W, p.y * H, s, 0, TAU); g.fill();
-      if (p.s > 3) { g.fillRect(p.x * W - s * 3, p.y * H - 0.6, s * 6, 1.2); g.fillRect(p.x * W - 0.6, p.y * H - s * 3, 1.2, s * 6); }   // a star's cross
-    }
-  }
-  function spectrum() {   // 32 log-spaced bands, smoothed, for the rays
-    const n = freq.length;
-    for (let i = 0; i < 32; i++) {
-      const a = Math.floor(2 * Math.pow(n / 3, i / 32)), b = Math.max(a + 1, Math.floor(2 * Math.pow(n / 3, (i + 1) / 32)));
-      let s = 0;
-      for (let k = a; k < b; k++) s += freq[k];
-      V.spec[i] += ((s / ((b - a) * 255)) ** 1.3 - V.spec[i]) * 0.4;
-    }
-  }
-  function drawWall(dt) {
-    const W = wallC.width, H = wallC.height, E = EN();
-    if (scheme.mode === 'rainbow') { hue = (hue + dt * 0.04 * (1 + A.highN)) % 1; V.cols = [0, 0.25, 0.5, 0.75].map((o) => toRGB(hueHex(hue + o))); }
-    V.t += dt * (0.35 + A.midN * 1.3) * E.vis;
-    V.kick *= Math.exp(-dt * (5 + E.k * 2)); V.glint *= Math.exp(-dt * 4); V.flash *= Math.exp(-dt * 7);
-    spectrum(); sparkles(dt);
-    const fade = { bloom: 0.22, rings: 0.32, ribbons: 0.28, rays: 0.34, field: 0.45 }[V.scene];
-    wg.globalCompositeOperation = 'source-over';
-    wg.fillStyle = `rgba(0,0,0,${fade})`; wg.fillRect(0, 0, W, H);
-    wg.globalCompositeOperation = 'lighter';
-    const n = V.cols.length;
-    if (V.scene === 'bloom') {
-      const m = Math.min(6, Math.max(3, n * 2));
-      for (let i = 0; i < m; i++) {
-        const c = colAt(i), x = W * (0.5 + 0.4 * Math.sin(V.t * 0.7 * (1 + i * 0.13) + i * 2.1)), y = H * (0.5 + 0.36 * Math.sin(V.t * 0.53 * (1 + i * 0.17) + i * 1.3));
-        const r = H * (0.26 + 0.1 * Math.sin(V.t + i)) * (1 + 0.55 * V.kick);
-        const g = wg.createRadialGradient(x, y, 0, x, y, r);
-        g.addColorStop(0, rgba(c, 0.8)); g.addColorStop(0.5, rgba(c, 0.3)); g.addColorStop(1, rgba(c, 0));
-        wg.fillStyle = g; wg.fillRect(x - r, y - r, r * 2, r * 2);
-      }
-    } else if (V.scene === 'rings') {
-      for (const R of V.rings) {
-        R.r += dt * H * 0.55 * (0.6 + A.midN) * E.vis;
-        const k = Math.max(0, 1 - R.r / (W * 0.62));
-        for (const [w, a] of [[26, 0.14], [7, 0.85]]) {
-          wg.strokeStyle = rgba(R.c, a * k); wg.lineWidth = w * (0.6 + R.w);
-          wg.beginPath(); wg.arc(W / 2, H / 2, R.r, 0, TAU); wg.stroke();
-        }
-      }
-      V.rings = V.rings.filter((R) => R.r < W * 0.62);
-      const c = colAt(V.ci), r = H * (0.08 + 0.12 * V.kick);
-      const g = wg.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, r * 2);
-      g.addColorStop(0, rgba(c, 0.9)); g.addColorStop(1, rgba(c, 0));
-      wg.fillStyle = g; wg.fillRect(W / 2 - r * 2, H / 2 - r * 2, r * 4, r * 4);
-    } else if (V.scene === 'ribbons') {
-      const k = n > 1 ? n : 3;
-      for (let i = 0; i < k; i++) {
-        const c = colAt(i), off = (i - (k - 1) / 2) * H * 0.13, amp = H * (0.07 + 0.24 * A.midN) * (1 + 0.45 * V.kick);
-        for (const [w, a] of [[24, 0.13], [6, 0.9]]) {
-          wg.strokeStyle = rgba(c, a); wg.lineWidth = w;
-          wg.beginPath();
-          for (let x = -10; x <= W + 10; x += 14) {
-            const y = H / 2 + off + Math.sin(x * 0.0062 * (1 + i * 0.22) + V.t * 2.2 * (1 + i * 0.12) + i * 1.7) * amp;
-            if (x < 0) wg.moveTo(x, y); else wg.lineTo(x, y);
-          }
-          wg.stroke();
-        }
-      }
-    } else if (V.scene === 'rays') {
-      V.rot += dt * (0.15 + A.midN * 1.1) * E.vis;
-      const m = 18 + E.k * 8, cx = W / 2, cy = H / 2;
-      wg.lineCap = 'round';
-      for (let i = 0; i < m; i++) {
-        const a = (i / m) * TAU + V.rot, v = V.spec[(Math.abs((i % 16) - 8) * 2) % 32];
-        const L = H * (0.12 + v * 0.95) * (1 + 0.3 * V.kick), c = colAt(i);
-        for (const [w, al] of [[16, 0.14], [4, 0.9]]) {
-          wg.strokeStyle = rgba(c, al); wg.lineWidth = w;
-          wg.beginPath(); wg.moveTo(cx + Math.cos(a) * H * 0.07, cy + Math.sin(a) * H * 0.07); wg.lineTo(cx + Math.cos(a) * L, cy + Math.sin(a) * L); wg.stroke();
-        }
-      }
-    } else {   // field: one colour at a time, stepping on the kick, a soft bar sweeping through
-      const c = colAt(V.ci);
-      wg.fillStyle = rgba(c, 0.1 + 0.7 * V.kick); wg.fillRect(0, 0, W, H);
-      const x = (((V.t * 0.35) % 1.4) - 0.2) * W, bw = W * 0.28;
-      const g = wg.createLinearGradient(x - bw, 0, x + bw, 0);
-      g.addColorStop(0, rgba(c, 0)); g.addColorStop(0.5, rgba(colAt(V.ci + 1), 0.55)); g.addColorStop(1, rgba(c, 0));
-      wg.fillStyle = g; wg.fillRect(x - bw, 0, bw * 2, H);
-    }
-    drawParts(wg, W, H);
-    if (V.flash > 0.02) { wg.fillStyle = `rgba(255,255,255,${V.flash * 0.32})`; wg.fillRect(0, 0, W, H); }
-  }
-  // the B-stage: round — a bloom at the centre, the rings, rays or orbiting blooms, the glints
-  function drawRing() {
-    const S = ringC.width, c = S / 2;
-    rg.globalCompositeOperation = 'source-over';
-    rg.fillStyle = 'rgba(0,0,0,0.3)'; rg.fillRect(0, 0, S, S);
-    rg.globalCompositeOperation = 'lighter';
-    if (V.scene === 'field') { rg.fillStyle = rgba(colAt(V.ci), 0.1 + 0.6 * V.kick); rg.beginPath(); rg.arc(c, c, S / 2, 0, TAU); rg.fill(); }
-    const col = colAt(V.ci), R = S * (0.14 + 0.14 * V.kick + 0.05 * A.low);
-    const g = rg.createRadialGradient(c, c, 0, c, c, R * 1.8);
-    g.addColorStop(0, rgba(col, 0.95)); g.addColorStop(1, rgba(col, 0));
-    rg.fillStyle = g; rg.fillRect(c - R * 2, c - R * 2, R * 4, R * 4);
-    for (const Rg of V.rings) {
-      const r = (Rg.r / (wallC.width * 0.62)) * S * 0.5, k = Math.max(0, 1 - r / (S * 0.5));
-      rg.strokeStyle = rgba(Rg.c, 0.85 * k); rg.lineWidth = 6 * (0.6 + Rg.w);
-      rg.beginPath(); rg.arc(c, c, r, 0, TAU); rg.stroke();
-    }
-    if (V.scene === 'bloom' || V.scene === 'ribbons') {
-      for (let i = 0; i < 3; i++) {
-        const a = V.t * 0.8 + (i / 3) * TAU, x = c + Math.cos(a) * S * 0.3, y = c + Math.sin(a) * S * 0.3, r = S * 0.16 * (1 + 0.4 * V.kick), cc = colAt(i);
-        const gg = rg.createRadialGradient(x, y, 0, x, y, r);
-        gg.addColorStop(0, rgba(cc, 0.75)); gg.addColorStop(1, rgba(cc, 0));
-        rg.fillStyle = gg; rg.fillRect(x - r, y - r, r * 2, r * 2);
-      }
-    } else {
-      rg.lineCap = 'round';
-      for (let i = 0; i < 24; i++) {
-        const a = (i / 24) * TAU + V.rot, v = V.spec[(i * 2) % 32];
-        rg.strokeStyle = rgba(colAt(i), 0.9); rg.lineWidth = 5;
-        rg.beginPath(); rg.moveTo(c + Math.cos(a) * S * 0.16, c + Math.sin(a) * S * 0.16);
-        rg.lineTo(c + Math.cos(a) * S * (0.2 + v * 0.3), c + Math.sin(a) * S * (0.2 + v * 0.3)); rg.stroke();
-      }
-    }
-    drawParts(rg, S, S);
-    if (V.flash > 0.02) { rg.fillStyle = `rgba(255,255,255,${V.flash * 0.3})`; rg.fillRect(0, 0, S, S); }
+  function drawScreens() {
+    NS?.render({
+      t: V.t, kick: V.kick, low: clamp01(V.low / Math.max(0.1, V.lowPeak)), high: clamp01(A.highN * EN().shimmer),
+      glint: V.glint, flash: V.flash, seed: V.seed, mode: V.mode, hueSpeed: 0.002 * (1 + A.highN),
+    });
   }
 
   // --- play and stop -----------------------------------------------------------------------------------
@@ -476,10 +367,9 @@ export function initAutoShow({ designer, setScreens, pa = null }) {
     try { await ctx.resume(); await audio.play(); } catch (_) { return false; }
     playing = true; paused = false;
     routePA();
-    before = { show: designer.snapshot?.(), tempo: designer.tempo };
+    before = D.snapshot();
     freshCount();
-    wg.fillStyle = '#000'; wg.fillRect(0, 0, wallC.width, wallC.height);
-    setScreens?.({ wall: wallTex, b: ringTex });
+    if (NS) { paintScreens(); drawScreens(); setScreens?.({ wall: NS.wall, b: NS.b }); }
     if (!raf) raf = requestAnimationFrame(frame);
     onChange();
     return true;
@@ -501,15 +391,24 @@ export function initAutoShow({ designer, setScreens, pa = null }) {
     onChange();
     return true;
   }
-  function stop() {
+  // a new spot in the song (the playhead): the show carries on from there, and the bars are
+  // counted again from the next kick
+  function seek(t) {
+    if (!url) return;
+    const d = Number.isFinite(audio.duration) ? audio.duration : 0;
+    audio.currentTime = Math.max(0, Math.min(d ? d - 0.05 : t, t));
+    A.beats = 0; A.lastKick = 0; A.kicks = 0; lastAt = audio.currentTime;
+    onChange();
+  }
+  // stop: hands the room back (the show from before); at the song's end, the room blacks out
+  function stop({ end = false } = {}) {
     if (!playing) return;
     playing = false; paused = false;
-    clearTimeout(glintT);
+    D.cancel?.();
     audio.pause();
     routePA();
     setScreens?.(null);
-    if (before?.show) designer.restore?.(before.show);
-    if (before && Number.isFinite(before.tempo)) designer.setTempo?.(before.tempo);
+    if (end) D.end(before); else D.restore(before);
     before = null;
     onChange();
   }
@@ -526,7 +425,8 @@ export function initAutoShow({ designer, setScreens, pa = null }) {
       onChange();
       if (was) play();   // a new song while one plays: straight on with it
     },
-    play, pause, restart, stop,
+    play, pause, restart, stop, seek,
+    get styles() { return D.styles; },   // what the Style row offers (the driver's)
     // inside a tap: wake the sound up now (a phone only lets it start from a touch)
     prime() { ensureAudio(); ctx.resume?.().catch?.(() => {}); },
     // the guess at the music, for the card: beats a minute, the bar it's on, the bars this effect lasts

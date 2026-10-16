@@ -45,6 +45,10 @@ import { initCrowdAudio } from './crowdaudio.js';
 import { buildHockeyProps } from './hockeyprops.js';
 import { initSmoke } from './smokefx.js';
 import { buildFOH, initFlag } from './setdressing.js';
+import { buildDelayPA } from './delaypa.js';
+import { initSpectacle } from './spectacle.js';
+import { initSportsRig } from './sportsrig.js';
+import { initHouseFixtures } from './houselights.js';
 import { initVideoPresets } from './videopresets.js';
 import { initConsole } from './console.js';
 import { StereoEffect } from 'three/addons/effects/StereoEffect.js';
@@ -68,6 +72,8 @@ window.__boot?.step(0.42, 'Building the venue');
 const DEBUG = new URLSearchParams(location.search).has('debug');
 // the phone and tablet showcase (index.html sets it; mobile.js has its controls)
 const MOBILE = !!window.PIXMOB_MOBILE;
+// which phone app (index.html): crowd (the wristbands lead), light (the stage lights lead), fx (the spectacle)
+const APP = window.PIXMOB_APP || 'crowd';
 // ?vr — phone-in-a-headset mode: stereo split + sensor head tracking, driven
 // from a laptop over the show relay. It has to be decided HERE, before the
 // context exists, because MSAA cannot be turned off later and it is the single
@@ -217,6 +223,9 @@ let concertSeats = buildConcertSeating(scene);
 // layout at boot; the menu's rig tab sets/clears it and reloads.
 let rigPlan = null;
 try { rigPlan = JSON.parse(localStorage.getItem('arena-active-rigplan') || 'null'); } catch (_) { /* corrupt */ }
+// a stage designed in the Build app ("Concept · style · screens") stays in the Build app: the other
+// phone apps share its storage on the web, and keep the house rig
+if (MOBILE && APP !== 'build' && rigPlan?.name?.includes(' · ')) rigPlan = null;
 const showRig = buildRig(scene, document.getElementById('video'), rigPlan);
 showRig.idleTex.wrapS = THREE.RepeatWrapping;   // the sphere stage's halo tiles it four times round
 showRig.idleTex.needsUpdate = true;
@@ -267,6 +276,12 @@ const crowdSFX = initCrowdAudio();
 const smokeFX = initSmoke(showRig.group, scene);
 const hockeyProps = buildHockeyProps(scene);
 const foh = buildFOH(scene);
+const delayPA = buildDelayPA(scene);
+// hockey and basketball nights: an oval truss of moving heads over the ice or the court (sportsrig.js)
+const sportsRig = VENUE === 'arena' ? initSportsRig(scene, { roofY: SPEC.roofY }) : null;
+// the roof's LED high-bays, the house lights you see when you look up (houselights.js)
+const houseFix = VENUE === 'arena' ? initHouseFixtures(scene, { roofY: SPEC.roofY }) : null;
+const HOUSE_WHITE = new THREE.Color(0xfff1e2);   // house lights: one neutral arena white   // the arena's second pair of PA hangs, halfway down the room (concerts)
 foh.setPosition(FOH_CX - 1.7, 0);   // desks against the pen's stage-side barrier
 const flagFX = initFlag(scene);
 const vPresets = initVideoPresets();
@@ -315,6 +330,10 @@ const rigFX = new RigFX(scene, showRig, {
   stageSpots: showLights.slice(4),
 });
 rigFX.setViewport(camera, window.innerHeight);
+if (MOBILE) {   // the phone apps: a brighter rig (beams, spots, washes, strips), lasers calmer and finer
+  Object.assign(rigFX.gain, { spot: 1.55, wash: 1.5, beam: 1.6, strip: 1.35, laser: 0.7 });
+  rigFX.laserMat.uniforms.uWidthPx.value = 1.7;
+}
 const bstageFX = new BStageFX(stage);
 const fasciaFX = new FasciaFX(bowl.fascias);
 // each room boots its ribbons into its own identity (the arena's blue belt);
@@ -398,6 +417,7 @@ function applyState(rebake = true) {
   for (const o of basketballStuff) o.visible = bball;
   if (bball) floorSeats.group.visible = basketballFloorOn;
   rink.visible = hockey;
+  if (sportsRig) sportsRig.group.visible = hockey || bball;   // the game rig: the sports nights' own lights
   stage.group.visible = concert;
   showRig.group.visible = concert;   // the touring package only loads in for shows
   rigFX.group.visible = concert;
@@ -429,8 +449,11 @@ function applyState(rebake = true) {
       // show lighting is a dark room: the wristbands and the screens carry it
       l.intensity = l.userData.baseIntensity * (concert ? 0.22 : hockey ? 0.3 : 0.55) * lightCfg.master;
     }
-    l.color.copy(rigColor);
+    l.color.copy(house ? HOUSE_WHITE : rigColor);
   }
+  // the fixtures up in the roof: the house lights all up; a game, the surface bright and the
+  // bowl low; a show or a blackout, off
+  houseFix?.set(dark ? 0 : house ? 1 : (hockey || bball) ? 0.95 : concert ? 0 : 0.45, dark ? 0 : house ? 1 : (hockey || bball) ? 0.2 : 0);
   for (const w of bowlWashes) {
     const zoneLevel = lightCfg['wash' + w.userData.zone];
     w.intensity = w.userData.baseIntensity * (house ? 4.4 : concert ? 0.3 : 0.5) * zoneLevel;
@@ -522,6 +545,7 @@ function setMode(mode) {
   bowlCull();
   hockeyProps.group.visible = mode === 'hockey';
   foh.group.visible = mode === 'concert' && !['theatre', 'hemicycle'].includes(stageCfg.curtains);
+  delayPA.group.visible = mode === 'concert' && !rigPlan?.ring;   // in the round the PA hangs over the middle: no delays
   if (liveCam?.live) requestRemap();   // seat blocks came or went: re-fit the picture
   applyVideoRoute();   // floor projection follows the surface for this mode
 }
@@ -881,7 +905,7 @@ function warmBirdView() {
   try {
     for (const m of [1 << 2, 1 | (1 << 2)]) {   // the lights only, then the whole arena with them
       birdCam.layers.mask = m;
-      if (renderer.compileAsync) renderer.compileAsync(scene, birdCam).catch(() => {}); else renderer.compile(scene, birdCam);
+      compileQuiet(scene, birdCam);
     }
   } catch (_) { /* a renderer without it: the first open builds them */ }
   scene.fog = fog;
@@ -1076,12 +1100,15 @@ const jumboFeed = MOBILE ? (() => {
     cut = next; t0 = performance.now(); p0 = 0.15 + Math.random() * 0.5;
   };
   jumboMesh.setVideo?.(rt.texture);
+  let over = null;   // a picture put up instead of the feed (the Moments app's messages)
   return {
+    override(tex) { over = tex || null; jumboMesh.setVideo?.(over || rt.texture); },
     render() {
       if (exporting) return;
       frame++;
       // the inside screens glow in the LED ribbons' colour (the show's colour, as it changes)
       jumboMesh.setInnerColor?.(fasciaFX.mode !== 'off' ? fasciaFX.colorA : rigFX.colorA);
+      if (over) return;   // showing a message: no camera feed to draw
       if (frame % 4 === 2) {   // the panorama underneath, on its own beat
         const was = jumboMesh.visible;
         jumboMesh.visible = false;
@@ -1209,6 +1236,13 @@ function screenFeed() {
   if (liveCam?.live && liveCam.screens) return { tex: camTex, fascia: camFasciaTex, live: true };
   if (videoPreset !== 'off') return { tex: vPresets.texture, fascia: vPresets.texture, live: true };
   return { tex: wallVideoTex, fascia: fasciaVideoTex, live: !!(orbFX.video && orbFX.video.readyState >= 2) };
+}
+// a screen feed by name (videopresets.js: waves, aurora, rings, bars, embers, starfield, show; off: the film)
+function setVideoPreset(name) {
+  videoPreset = name || 'off';
+  vPresets.setPreset(videoPreset === 'off' ? null : videoPreset);
+  document.querySelectorAll('[data-vpreset]').forEach((x) => x.classList.toggle('active', x.dataset.vpreset === videoPreset));
+  applyVideoRoute();
 }
 function applyVideoRoute() {
   const presetOn = videoPreset !== 'off';
@@ -2098,6 +2132,8 @@ const followSpot = {
   curEnd: new THREE.Vector3(-20, 2.5, 0),   // light that misses keeps going
 };
 followSpot.light.position.set(SPEC.followSpot.x, SPEC.followSpot.y, 0);
+followSpot.baseI = followSpot.light.intensity;
+followSpot.light.intensity = 0;
 followSpot.light.visible = false;
 scene.add(followSpot.light, followSpot.light.target);
 const fsConeGeo = new THREE.ConeGeometry(1, 1, 24, 1, true);
@@ -2286,7 +2322,10 @@ function aimFollowSpotFrom(ndcX, ndcY) {
 }
 function updateFollowSpot(dt) {
   const live = followSpot.on && currentMode === 'concert';
-  followSpot.light.visible = live;
+  // on and off by its brightness, never its visibility: hiding or showing a light rebuilds every
+  // lit shader in the room, which was the long wait before the spot came on
+  followSpot.light.visible = currentMode === 'concert';
+  followSpot.light.intensity = live ? followSpot.baseI : 0;
   fsCone.visible = live;
   fsPool.visible = live;
   if (!live) fsPool2.visible = false;
@@ -3759,6 +3798,8 @@ function animate() {
   balloonFX.update(dt);
   arenaFX.update(dt);
   smokeFX.update(dt);
+  spectacle?.update(dt);
+  if (sportsRig?.group.visible) sportsRig.update(dt, gameRigState());
   vPresets.update(dt);
   // jumbotron winch. Show height 18.4; RETRACT docks it snugly in the truss
   // forest just under the ceiling deck — it never pierces the roof geometry
@@ -5213,20 +5254,25 @@ function followShow(dt, now) {
   const suites = !!suiteSwitch?.classList.contains('active') && lighting !== 'blackout';
   const leds = fasciaFX.mode === 'show';
   const concert = currentMode === 'concert';
-  const rig = stageFollow.on && concert;
+  // The Crowd app: the wristbands lead and the room follows them. Light and FX: switched round,
+  // the stage lights lead (the ribbons, rims and catwalk take the rig's colours).
+  const crowdLeads = APP === 'crowd';
+  const rig = crowdLeads && stageFollow.on && concert;
   // BLACKOUT (the first tile of every Show tab): everything that follows the show goes dark
   // with the bands (the stage lights, the ribbons, the screens and rims that take their colour)
-  const black = orbFX.mode === 'design' && showUI.demo === 'blackout';
+  const black = crowdLeads ? orbFX.mode === 'design' && showUI.demo === 'blackout'
+    : rigFX.look === 'blackout' || rigFX.master * rigFX.grand < 0.02;
   if (now - tintAt > 0.12 || now < tintAt) {
     tintAt = now;
-    const c = !black && orbFX.mode !== 'off' ? sampleShowColour() : null;
+    const c = black ? null : !crowdLeads ? _tintWant.copy(rigFX.colorA) : orbFX.mode !== 'off' ? sampleShowColour() : null;
+    if (c && !crowdLeads) _tintB.copy(rigFX.colorB);
     showOn = !!c;
     tintTarget = black ? BLACK : c || WARM;
     tintTargetB = black ? BLACK : c ? _tintB : WARM;
   }
   const k = Math.min(1, dt * 5);
-  showTint.lerp(tintTarget, k);
-  showTintB.lerp(tintTargetB, k);
+  if (black) { showTint.copy(BLACK); showTintB.copy(BLACK); }   // a blackout is instant: nothing glows and then fades
+  else { showTint.lerp(tintTarget, k); showTintB.lerp(tintTargetB, k); }
   if (leds) fasciaFX.colorA.copy(showTint);
   if (suites) bowl.setSuiteLights(true, showTint);
   // the catwalk's rope light and the B-stage's rim follow the bands, always
@@ -5256,7 +5302,7 @@ function followShow(dt, now) {
     rigFX.colorA.copy(showTint);
     rigFX.colorB.copy(showTintB);
     // calmer than the rig's own looks: dimmer, darker with the bands, and no lasers
-    rigFX.master = black ? Math.max(0, rigFX.master - dt * 1.2) : showOn ? 0.18 + 0.14 * Math.min(1, showLift * 1.5) : 0.14;   // gentle: well under the rig's own looks
+    rigFX.master = black ? 0 : showOn ? 0.42 + 0.33 * Math.min(1, showLift * 1.5) : 0.32;   // following the crowd, bright enough to read as a show
     // the phone's FX tray can fire every laser, bright, over the calm show
     const lt = performance.now(), ldt = Math.min(0.1, (lt - (fxLaserAt || lt)) / 1000);
     fxLaserAt = lt;
@@ -5266,15 +5312,29 @@ function followShow(dt, now) {
     rigFX.strobeOn = false; rigFX.blindersOn = false;
   }
   // the stage lights black out too, whatever look they run, and come back as they were
-  if (black && concert) {
+  if (crowdLeads && black && concert) {
     if (!blackRig) blackRig = { master: rigFX.master };
-    rigFX.master *= Math.max(0, 1 - k * 1.5);
-    if (rigFX.master < 0.004) rigFX.master = 0;
+    rigFX.master = 0;
   } else if (blackRig) {
     if (!rig) rigFX.master = blackRig.master;   // (following the show, the line above sets it)
     blackRig = null;
   }
 }
+var spectacle = null;
+// what the game rig plays: the stage rig's state (Light, Moments, Build), or the wristbands' colours (Crowd)
+var gameRigVibe = 'sweep', gameRigVibeAt = 0;
+function gameRigState() {
+  if (APP === 'crowd') {
+    const now = performance.now();
+    if (now - gameRigVibeAt > 500) { gameRigVibeAt = now; gameRigVibe = ({ anthem: 'sweep', ballad: 'slowfan', tilt: 'tiltwave' })[stageVibe().cue] || 'sweep'; }
+    const black = orbFX.mode === 'design' && showUI.demo === 'blackout';
+    return { a: showTint, b: showTintB, level: black ? 0 : showOn ? 0.6 + 0.4 * Math.min(1, showLift * 1.5) : 0.25, beh: gameRigVibe, rate: 0.8 * (showUI.tempo || 1) };
+  }
+  return {
+    a: rigFX.colorA, b: rigFX.colorB, level: sportsRig.levelOf(rigFX.look) * rigFX.master * rigFX.grand, beh: rigFX.behaviour, rate: rigFX.rate ?? 1,
+    strobe: rigFX.strobeOn, blind: rigFX.blindersOn, rainbow: rigFX.stripMode === 'rainbow' || /rainbow|full|encore/.test(rigFX.look),
+  };
+}   // drones, bubbles, balloon drops, smoke drops (spectacle.js): the FX app's, built on first use
 var fxLasers = false, fxLaserK = 0, fxLaserAt = 0;   // (var: followShow runs before this line on the first frames)
 var blackRig = null;   // the stage lights' level before a Blackout
 // --- the venue's speakers, live -----------------------------------------------------
@@ -5886,6 +5946,9 @@ new MutationObserver(() => { if (document.body.classList.contains('menu')) tips.
 }
 menuUI.onEnter = (mode) => { applyAppMode(mode, { entering: true }); if (!RENDER_JOB && !MOBILE) tips.firstTime(); setTimeout(warmBirdView, 1500); };   // the room is built now: ready its map
 applyAppMode(menuUI.mode);
+// a fresh visit: the room waits in Blackout from the start, so walking in never shows lights
+// that are on and then go off (a venue switch's reload keeps the show it had)
+if (APP === 'crowd' && menuUI.mode === 'quick' && !menuUI.fromReload) showUI.playDemo('blackout');
 switchModeBtn?.addEventListener('click', (e) => {
   e.stopPropagation();
   document.getElementById('settingsPanel').classList.add('hidden');
@@ -5974,6 +6037,19 @@ renderer.setAnimationLoop(animate);
 // first frames one shader at a time. The bar creeps on while it works; the
 // screen lifts after the first frames are drawn.
 var bootReady = false, bootFrames = 3, bootMenu = false;
+// renderer.compileAsync, but a material dropped while it waits (a stage rebuilt from the set-up a
+// reload carried over) is let go instead of crashing the wait (three's own check reads its program)
+function compileQuiet(sc, cam) {
+  const mats = renderer.compile(sc, cam);
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    const check = () => {
+      for (const m of mats) { const p = renderer.properties.get(m).currentProgram; if (!p || p.isReady()) mats.delete(m); }
+      if (!mats.size || performance.now() - t0 > 20000) resolve(); else setTimeout(check, 10);
+    };
+    check();
+  });
+}
 {
   // the menu's moving background is the first thing seen: wait for it to play (a few seconds at most)
   const mv = document.getElementById('mBgVideo');
@@ -5987,7 +6063,7 @@ var bootReady = false, bootFrames = 3, bootMenu = false;
     window.__boot?.step(0.55 + 0.35 * (1 - Math.exp(-(performance.now() - t0) / 5000)));
   }, 150);
   const ready = () => { bootReady = true; window.__boot?.step(0.95, 'Almost ready'); };
-  try { (renderer.compileAsync ? renderer.compileAsync(scene, camera) : Promise.resolve()).then(ready, ready); }
+  try { compileQuiet(scene, camera).then(ready, ready); }
   catch (_) { ready(); }
 }
 
@@ -6095,6 +6171,28 @@ if (MOBILE) {
     focus: { start: startFocus, stop: stopFocus, get on() { return !!focus; } },
     setScreens: (t) => { autoScreens = t; applyVideoRoute(); },   // Auto Show (dev) takes the screens, or gives them back
     // the arena PA (audiofx.js): Auto Show's song can play from its speaker stacks, in the room's acoustics
+    renderer,   // Auto Show draws its screens' visuals on the graphics card
+    // the Light and FX apps' engine: the rig, the screens, the effects
+    eng: {
+      APP, VENUE, THREE, renderer, scene, rigFX, arenaFX, pyroFX, smokeFX, balloonFX, orbFX, bstageFX, fasciaFX, showUI, IS_STADIUM,
+      fireworks: IS_STADIUM ? fireworksFX : null,
+      setVideoPreset, setStageFollow,
+      setScreens: (t) => { autoScreens = t; applyVideoRoute(); },
+      confettiAmount: (v) => { pyroFX.setConfettiDensity(v); arenaFX.setConfettiDensity(v); rigFX.confetti.mesh.material.uniforms.uDensity.value = v; },
+      get spectacle() { return spectacle || (spectacle = initSpectacle(scene)); },
+      rigPlan: () => rigPlan,
+      // Moments and Build: the room's setup, its house lights, the follow spot, the jumbotron, the views
+      builder: builderUI,
+      setLighting, get lighting() { return lighting; }, get mode() { return currentMode; },
+      followSpot: (target) => {   // on, aimed at a point ([x, y, z]); null: off
+        if (!target) { setFollowSpot(false); return; }
+        followSpot.target.fromArray(target); followSpot.end.fromArray(target);
+        if (!followSpot.on) setFollowSpot(true);
+      },
+      jumbo: (tex) => jumboFeed?.override(tex),
+      views: () => ANGLES.map((a, i) => ({ i, name: (currentMode === 'concert' && a.concert ? a.concert : a).name, pos: (currentMode === 'concert' && a.concert ? a.concert : a).pos })).filter((v) => !ANGLES[v.i].skip),
+      setAngle,
+    },
     pa: { context: () => audioFX.getContext(), attach: (node) => audioFX.attachNode(node), get on() { return venueSound.on; }, set: (v) => venueSound.set(v) },
     bird: { set: setBirdMode, get mode() { return birdMode; } },
     fx: {
