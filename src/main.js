@@ -697,7 +697,7 @@ function hazeTick() {
   u.uNear.value = camera.near; u.uFar.value = camera.far;
   // the veil is lit by the show: a neutral floor plus a wash of the rig's colours
   _hazeTint.copy(rigFX.colorA).lerp(rigFX.colorB, 0.5);
-  const m = Math.max(0, Math.min(1, rigFX.master));
+  const m = Math.max(0, Math.min(1, rigFX.master * rigFX.grand));   // as bright as the rig runs (Light fixtures, the fade line)
   u.uCol.value.setRGB(0.010 + 0.040 * _hazeTint.r * m, 0.010 + 0.040 * _hazeTint.g * m, 0.013 + 0.040 * _hazeTint.b * m);
 }
 {
@@ -5186,16 +5186,19 @@ function applyLightsFade() {
   if (hemi.userData.applied != null) hemi.intensity = hemi.userData.applied * lightsK;
 }
 let grandKey = '';
+// SHOW → Light fixtures: how bright the stage rig and the game rig run, 0..1 (the wristbands and the
+// house lights keep their own levels). On the rig's grand master, so every fixture type follows it.
+let fixturesK = 1;
 function setGrand(level) {
   const T = fadeLine.pts ? fadeLine.targets : null;
   const on = (t) => !T || T[t] !== false;
-  const key = `${level.toFixed(3)}|${FADE_TARGETS.map((t) => (on(t) ? 1 : 0)).join('')}`;
+  const key = `${level.toFixed(3)}|${fixturesK.toFixed(3)}|${FADE_TARGETS.map((t) => (on(t) ? 1 : 0)).join('')}`;
   if (key === grandKey) return;
   grandKey = key;
   const k = level ** 2.2;   // the line is what the eye sees; the lights take linear light
   orbFX.grand = on('orbs') ? k : 1;
   orbFX._staticDirty = true;
-  rigFX.grand = on('rig') ? k : 1;
+  rigFX.grand = (on('rig') ? k : 1) * fixturesK;
   grandK = on('video') ? k : 1;
   fasciaFX.grand = grandK;
   applyScreens();
@@ -5414,7 +5417,7 @@ function gameRigState() {
     const now = performance.now();
     if (now - gameRigVibeAt > 500) { gameRigVibeAt = now; gameRigVibe = ({ anthem: 'sweep', ballad: 'slowfan', tilt: 'tiltwave' })[stageVibe().cue] || 'sweep'; }
     const black = orbFX.mode === 'design' && showUI.demo === 'blackout';
-    return { a: showTint, b: showTintB, level: black ? 0 : showOn ? 0.6 + 0.4 * Math.min(1, showLift * 1.5) : 0.25, beh: gameRigVibe, rate: 0.8 * (showUI.tempo || 1) };
+    return { a: showTint, b: showTintB, level: (black ? 0 : showOn ? 0.6 + 0.4 * Math.min(1, showLift * 1.5) : 0.25) * fixturesK, beh: gameRigVibe, rate: 0.8 * (showUI.tempo || 1) };
   }
   return {
     a: rigFX.colorA, b: rigFX.colorB, level: sportsRig.levelOf(rigFX.look) * rigFX.master * rigFX.grand, beh: rigFX.behaviour, rate: rigFX.rate ?? 1,
@@ -5581,7 +5584,12 @@ const showPanel = initShowPanel({
   songTitle: () => (directorUI.engine.file?.name || '').replace(/\.[^.]+$/, ''),
   songLen: () => directorUI.engine.buffer?.duration || 0,
   venueSound,
-  stageLights: { get on() { return stageFollow.on; }, set: (on) => setStageFollow(on), get concert() { return currentMode === 'concert'; } },
+  stageLights: {
+    get on() { return stageFollow.on; }, set: (on) => setStageFollow(on), get concert() { return currentMode === 'concert'; },
+    // Light fixtures: the rigs' brightness (the grand master picks it up on the next frame)
+    get level() { return fixturesK; },
+    setLevel(k) { const v = Number(k); fixturesK = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1; grandKey = ''; },
+  },
   // the recording's run of shots, for the panel to list, and to look at one of them
   shots: {
     plan: (len, pullAt, opts) => shotPlan(len, pullAt, opts),

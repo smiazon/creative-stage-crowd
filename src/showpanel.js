@@ -265,6 +265,8 @@ const TUNE = {
   mpunch: { to: (v) => v, from: (s) => s, fmt: (s) => `${Math.round(s * 100)}%` },
   // the speed of the effect, per tab: 0 holds it still, 100% as designed, 200% double
   espd: { to: (v) => v * 2, from: (s) => Math.min(1, Math.max(0, s / 2)), fmt: (s) => `${Math.round(s * 100)}%` },
+  // how bright the light fixtures run (the stage rig and the game rig): off to as built
+  fixk: { to: (v) => v, from: (s) => s, fmt: (s) => `${Math.round(s * 100)}%` },
   // MH gobo size: 30% to 300% of each effect's own beam
   mhsize: { to: (v) => lin(v, 0.3, 3), from: (s) => linUnmap(s, 0.3, 3), fmt: (s) => `${Math.round(s * 100)}%` },
   // how many moving heads an effect may use: one, up to every head in the room
@@ -301,6 +303,7 @@ export function initShowPanel({ designer, orbFX, controls, audience, room, ir, p
   if (!['wash', 'ir', 'group'].includes(prefs.kind)) prefs.kind = 'grid';
   ir?.setBeams(!!prefs.beams);   // the IR signal is invisible unless asked for
   setGoboScale(prefs.goboK || 1);   // the MH gobo size, as it was left
+  if (prefs.fixK != null) stageLights?.setLevel(prefs.fixK);   // and the light fixtures' brightness
   HEADS = Math.max(1, ir?.count || HEADS);
   setHeadCap(prefs.headCap && prefs.headCap < HEADS ? prefs.headCap : 0);   // and how many heads, as left
   // "Use stage lights" and "Use venue speakers" start ON (asked for 2026-10-08),
@@ -377,6 +380,7 @@ export function initShowPanel({ designer, orbFX, controls, audience, room, ir, p
       </div>
       <div class="spColRow"><div class="spSlots"></div><div class="spCombos"><button data-col="rainbow" class="spCombo spRainbowSw" title="Rainbow"></button>${[...designer.pairs.map(([a, b, n]) => [n, [a, b]]), ...COMBOS].map(([n, L], i) => `<button class="spCombo" data-combo="${i}" title="${n}" style="background:linear-gradient(90deg,${L.map((c, k) => `${c} ${(k / L.length) * 100}% ${((k + 1) / L.length) * 100}%`).join(',')})"></button>`).join('')}</div></div>
       <div class="spSpeedRow">${slider('espd', 'Speed of effect')}</div>
+      <div class="spSpeedRow">${slider('fixk', 'Light fixtures')}</div>
       <div class="spSpeedRow spGoboRow">${slider('mhsize', 'Gobo size')}</div>
       <div class="spSpeedRow spGoboRow spHeadsRow">${slider('mhheads', 'Moving heads')}</div>
       <div class="spPane" data-pane="grid">
@@ -680,6 +684,7 @@ export function initShowPanel({ designer, orbFX, controls, audience, room, ir, p
       flevel: designer.level, ftime: prefs.fadeTime,
       sglow: glow ? glow.screen : 1, bloom: glow ? glow.bloom : 1,
       mhsize: prefs.goboK || 1,
+      fixk: stageLights?.level ?? 1,
       mhheads: prefs.headCap && prefs.headCap < HEADS ? prefs.headCap : HEADS,
     };
     // the gobo slider is for moving heads: on the MH tab only
@@ -1281,6 +1286,7 @@ export function initShowPanel({ designer, orbFX, controls, audience, room, ir, p
     else if (k === 'pglow') audience.setPixelGlow?.(s);
     else if (MIXK[k]) { prefs.mix[MIXK[k]] = s; save(); venueSound?.setMix(prefs.mix); }
     else if (k === 'mhsize') { prefs.goboK = s; save(); setGoboScale(s); }
+    else if (k === 'fixk') { prefs.fixK = s; save(); stageLights?.setLevel(s); }
     else if (k === 'mhheads') { prefs.headCap = s >= HEADS ? 0 : s; save(); setHeadCap(prefs.headCap); }
     else if (k === 'espd') {
       const kind = e.target.closest('#videoPanel') ? prefs.vkind : prefs.kind;
